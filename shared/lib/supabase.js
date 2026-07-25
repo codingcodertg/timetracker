@@ -159,19 +159,20 @@ export const auth = {
     if (error) throw error;
   },
 
-  // Admin creates a user without losing their own session: sign the new user up
-  // on a throwaway client (no persistence). Supabase emails them a confirmation;
-  // the trigger creates their profile as pending until an admin activates it.
+  // Admin creates a user directly via the `create-user` Edge Function: the
+  // account is made server-side with the email pre-confirmed, so no
+  // confirmation email is sent and the temp password works immediately. The
+  // trigger creates their profile as pending until an admin activates it.
   async adminCreateUser({ email, name, password }) {
-    const tmp = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: { persistSession: false, autoRefreshToken: false, storageKey: 'tt-admin-invite' },
+    const { data, error } = await supabase.functions.invoke('create-user', {
+      body: { email: email.trim(), name: (name || '').trim(), password },
     });
-    const { data, error } = await tmp.auth.signUp({
-      email: email.trim(),
-      password,
-      options: { data: { name: (name || '').trim() }, emailRedirectTo: emailRedirect() },
-    });
-    if (error) throw error;
+    if (error) {
+      let msg = error.message || 'Create failed';
+      try { const body = await error.context.json(); if (body?.error) msg = body.error; } catch { /* ignore */ }
+      throw new Error(msg);
+    }
+    if (data && data.error) throw new Error(data.error);
     return data;
   },
 
