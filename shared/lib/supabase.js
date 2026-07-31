@@ -218,8 +218,15 @@ export const auth = {
 // ---------------------------------------------------------------------
 // generic realtime list helper (initial select + refetch on any change)
 // ---------------------------------------------------------------------
+// Every live subscription registers here so recoverConnection() can re-run its
+// initial load and rebuild its realtime channel after the network/socket dies
+// (e.g. the machine slept). Without this, a resumed app shows "Failed to fetch"
+// and stale data until it's restarted.
+const activeSubs = new Set();
+
 function subscribeList(table, { query, realtimeFilter, orderBy } = {}, callback) {
   let cancelled = false;
+  let channel = null;
 
   async function load() {
     let q = supabase.from(table).select('*');
@@ -231,16 +238,45 @@ function subscribeList(table, { query, realtimeFilter, orderBy } = {}, callback)
     callback((data || []).map(rowToCamel));
   }
 
+  function openChannel() {
+    if (channel) { try { supabase.removeChannel(channel); } catch { /* ignore */ } }
+    const changeConfig = { event: '*', schema: 'public', table };
+    if (realtimeFilter) changeConfig.filter = realtimeFilter;
+    channel = supabase
+      .channel(`${table}:${realtimeFilter || 'all'}:${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', changeConfig, load)
+      .subscribe();
+  }
+
   load();
+  openChannel();
 
-  const changeConfig = { event: '*', schema: 'public', table };
-  if (realtimeFilter) changeConfig.filter = realtimeFilter;
-  const channel = supabase
-    .channel(`${table}:${realtimeFilter || 'all'}:${Math.random().toString(36).slice(2)}`)
-    .on('postgres_changes', changeConfig, load)
-    .subscribe();
+  const entry = { load, openChannel };
+  activeSubs.add(entry);
 
-  return () => { cancelled = true; supabase.removeChannel(channel); };
+  return () => {
+    cancelled = true;
+    activeSubs.delete(entry);
+    if (channel) { try { supabase.removeChannel(channel); } catch { /* ignore */ } }
+  };
+}
+
+// Recover after the connection went stale (resume from sleep, network back,
+// tab refocused). Refresh the auth token, kick the realtime socket, then
+// rebuild every channel and re-fetch its data so the UI is live again without
+// an app restart. Debounced so a burst of triggers only recovers once.
+let recovering = false;
+export async function recoverConnection() {
+  if (recovering) return;
+  recovering = true;
+  try {
+    await supabase.auth.refreshSession().catch(() => {});
+    try { supabase.realtime.disconnect(); } catch { /* ignore */ }
+    try { supabase.realtime.connect(); } catch { /* ignore */ }
+    for (const s of activeSubs) { s.openChannel(); s.load(); }
+  } finally {
+    setTimeout(() => { recovering = false; }, 1500);
+  }
 }
 
 function makeCrud(table) {

@@ -396,9 +396,10 @@ app.whenReady().then(() => {
     setupAutoUpdate();
     autoUpdater.checkForUpdates().catch((e) => console.error('update check failed:', e.message));
   }
-  // Auto-stop: when the machine locks or goes to sleep, tell the renderer so it
-  // can stop the timer (no point counting time while the user is away/locked).
-  ['lock-screen', 'suspend'].forEach((evt) => {
+  // Power events → renderer. On lock/sleep the renderer stops the timer (no
+  // point counting while away). On resume/unlock it reconnects to Supabase so
+  // the app recovers from the dead socket/stale token without a restart.
+  ['lock-screen', 'suspend', 'resume', 'unlock-screen'].forEach((evt) => {
     powerMonitor.on(evt, () => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('tt:power', evt);
     });

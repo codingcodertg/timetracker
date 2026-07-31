@@ -1,8 +1,8 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import { configOk, auth, profiles, settings as settingsApi } from '@shared/lib/supabase.js';
+import { configOk, auth, profiles, settings as settingsApi, recoverConnection } from '@shared/lib/supabase.js';
 import { syncAppSettings, APP_SETTINGS } from './lib/helpers.js';
 import { SettingsProvider } from './lib/SettingsContext.jsx';
-import { initDesktopShots, IS_DESKTOP, desktopGetVersion, desktopOnUpdate, desktopGetUpdateState, desktopCheckUpdate, desktopInstallUpdate } from './lib/desktop.js';
+import { initDesktopShots, IS_DESKTOP, desktopOnPower, desktopGetVersion, desktopOnUpdate, desktopGetUpdateState, desktopCheckUpdate, desktopInstallUpdate } from './lib/desktop.js';
 import { initOfflineQueue, subscribeOfflineStatus } from './lib/offlineQueue.js';
 import { APP_VERSION } from './lib/version.js';
 import { ensureNotifyPermission } from './lib/notify.js';
@@ -34,6 +34,25 @@ export default function App() {
   // offline buffering: flush any queued session updates / screenshots on
   // reconnect (works on web too; most valuable on the desktop app)
   useEffect(() => { initOfflineQueue(); }, []);
+
+  // Recover the Supabase connection after it goes stale — resume from sleep,
+  // network coming back, or the tab being refocused. Refreshes the token,
+  // reconnects realtime, and re-fetches, so the app never gets stuck on
+  // "Failed to fetch" needing a restart.
+  useEffect(() => {
+    const onOnline = () => recoverConnection();
+    const onVisible = () => { if (document.visibilityState === 'visible') recoverConnection(); };
+    window.addEventListener('online', onOnline);
+    document.addEventListener('visibilitychange', onVisible);
+    const offPower = desktopOnPower((reason) => {
+      if (reason === 'resume' || reason === 'unlock-screen') recoverConnection();
+    });
+    return () => {
+      window.removeEventListener('online', onOnline);
+      document.removeEventListener('visibilitychange', onVisible);
+      offPower();
+    };
+  }, []);
 
   // ask for OS-notification permission once signed in
   useEffect(() => { if (user) ensureNotifyPermission(); }, [user]);

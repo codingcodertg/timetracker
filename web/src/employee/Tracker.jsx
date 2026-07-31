@@ -132,7 +132,10 @@ export default function Tracker({ profile, user, assignments, sessions }) {
   stopRef.current = stop;
   useEffect(() => {
     if (!IS_DESKTOP) return undefined;
-    return desktopOnPower(() => {
+    return desktopOnPower((reason) => {
+      // Only lock/sleep stops the timer; resume/unlock is handled by the
+      // reconnect logic in App.jsx, not here.
+      if (reason !== 'suspend' && reason !== 'lock-screen') return;
       if (runningRef.current && stopRef.current) {
         notify({ title: 'Tracking stopped', body: 'Your screen locked or the computer went to sleep, so tracking was stopped.' });
         stopRef.current();

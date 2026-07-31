@@ -27,8 +27,9 @@ contextBridge.exposeInMainWorld('ttDesktop', {
   // the screen that changed since the last probe
   getContext: () => ipcRenderer.invoke('tt:context'),
 
-  // fired when the OS locks the screen or the machine sleeps; cb receives the
-  // reason ('lock-screen' | 'suspend'). Returns an unsubscribe function.
+  // fired on OS power events; cb receives the reason
+  // ('lock-screen' | 'suspend' | 'resume' | 'unlock-screen'). Returns an
+  // unsubscribe function.
   onPower: (cb) => {
     const listener = (_evt, reason) => cb(reason);
     ipcRenderer.on('tt:power', listener);
