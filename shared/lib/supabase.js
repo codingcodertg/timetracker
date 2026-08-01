@@ -279,6 +279,13 @@ export async function recoverConnection() {
   }
 }
 
+// True if an error is a Postgres row-level-security rejection — almost always a
+// stale/absent JWT (auth.uid() came back null), fixable by a token refresh.
+function isRlsError(e) {
+  const msg = String((e && (e.message || e.code)) || '').toLowerCase();
+  return msg.includes('row-level security') || msg.includes('42501') || e?.code === '42501';
+}
+
 function makeCrud(table) {
   return {
     async insert(data) {
@@ -456,6 +463,39 @@ export const requests = {
 // ---------------------------------------------------------------------
 export const payrolls = {
   ...makeCrud('payrolls'),
+  // Payroll writes require is_admin(), which needs a live auth.uid(). With a
+  // stale token an INSERT throws an RLS error and an UPDATE silently matches
+  // zero rows (no error) — so "Mark paid / unpaid" appeared to do nothing.
+  // Refresh the session first, retry once on an RLS rejection, and treat a
+  // zero-row update as a failure with a clear message.
+  async insert(data) {
+    await auth.ensureSession().catch(() => {});
+    try {
+      const { data: row, error } = await supabase.from('payrolls').insert(toSnakeRow(data)).select().single();
+      if (error) throw error;
+      return rowToCamel(row);
+    } catch (e) {
+      if (!isRlsError(e)) throw e;
+      await auth.forceRefresh().catch(() => {});
+      const { data: row, error } = await supabase.from('payrolls').insert(toSnakeRow(data)).select().single();
+      if (error) throw error;
+      return rowToCamel(row);
+    }
+  },
+  async update(id, patch) {
+    await auth.ensureSession().catch(() => {});
+    const write = () => supabase.from('payrolls').update(toSnakeRow(patch)).eq('id', id).select('id');
+    let { data, error } = await write();
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      await auth.forceRefresh().catch(() => {});
+      ({ data, error } = await write());
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        throw new Error('Could not update the payment — your login may have expired or you may not have manager permissions. Sign out and back in, then try again.');
+      }
+    }
+  },
   subscribeByEmployee(employeeUid, callback) {
     return subscribeList('payrolls', {
       query: (q) => q.eq('employee_uid', employeeUid),
