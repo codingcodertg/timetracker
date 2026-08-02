@@ -73,8 +73,14 @@ export default function App() {
     if (!user) { setProfile(null); setProfileError(''); return; }
     setProfileError('');
     return profiles.subscribe(user.id, (p) => {
-      setProfile(p);
-      if (!p) setProfileError('Waiting for your profile to be created…');
+      if (p) { setProfile(p); setProfileError(''); return; }
+      // An empty result here is almost always transient — after the PC wakes,
+      // the profile re-fetch can briefly return nothing while the token
+      // refreshes (RLS sees a null auth.uid()). Don't wipe an already-loaded
+      // profile back to the "Setting up your account…" screen; keep the last
+      // good one and let the reconnect re-fetch (recoverConnection) refresh it.
+      setProfile((prev) => prev || null);
+      setProfileError((prev) => prev || 'Waiting for your profile to be created…');
     });
   }, [user]);
 
