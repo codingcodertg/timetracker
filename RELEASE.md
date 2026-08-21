@@ -1,7 +1,14 @@
 # Releasing the desktop app + turning on auto-update
 
+> **⚠️ 2026-08-20:** the desktop app no longer bundles `web/` — it loads
+> deliveries-app's hosted `/timetracker` route at runtime (see
+> `desktop/README.md` and the notice atop `CLAUDE.md`). Part 4/5 below are
+> updated to drop the `npm run build --prefix web` step. Everything about
+> the GitHub Release / auto-update mechanism itself is unchanged.
+
 Follow this on your **Windows machine** (not needed for the web app). This is
-already configured for GitHub user **`CARRERSRTG`** and repo **`timetracker`**
+already configured for GitHub user **`codingcodertg`** (renamed from
+`CARRERSRTG`, 2026-08-20) and repo **`timetracker`**
 (see `desktop/package.json` → `build.publish`). Auto-update is wired in the code;
 these steps give it a release feed to check against.
 
@@ -53,17 +60,17 @@ In PowerShell from the project root:
 ```powershell
 $env:GH_TOKEN = "PASTE_YOUR_TOKEN_HERE"
 npm install
-npm run build --prefix web
 cd desktop
 ..\node_modules\.bin\electron-builder --win nsis --publish always
 cd ..
 ```
 
 What this does:
-- Builds the web UI, packages the Windows app, and **uploads** the installer
-  (`Time Tracker Setup 0.0.0.exe`) plus a `latest.yml` manifest to a **GitHub
-  Release** tagged `v0.0.0`.
-- Check <https://github.com/CARRERSRTG/timetracker/releases> — you'll see it.
+- Packages the Windows app (it loads deliveries-app's hosted `/timetracker`
+  route at runtime — no local UI to build here anymore) and **uploads** the
+  installer (`Time Tracker Setup 0.0.0.exe`) plus a `latest.yml` manifest to
+  a **GitHub Release** tagged `v0.0.0`.
+- Check <https://github.com/codingcodertg/timetracker/releases> — you'll see it.
 
 Hand that `.exe` to your employees to install. This is the full build (screenshots
 + global keystrokes + smart idle — all native modules included, because your
@@ -79,7 +86,6 @@ machine doesn't strip them like the cloud sandbox did).
 3. Republish:
    ```powershell
    $env:GH_TOKEN = "PASTE_YOUR_TOKEN_HERE"
-   npm run build --prefix web
    cd desktop
    ..\node_modules\.bin\electron-builder --win nsis --publish always
    cd ..

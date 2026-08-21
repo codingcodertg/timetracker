@@ -1,5 +1,32 @@
 # Time Tracker — Project Brief (read this first)
 
+> **⚠️ 2026-08-20 — this module was merged into `deliveries-app` (a
+> separate repo). Read this before touching anything below.**
+>
+> - **The desktop client** (`desktop/`) no longer loads `web/`. It now
+>   `loadURL`s the hosted Track Time route inside `deliveries-app`
+>   (`https://deliveries-app-seven.vercel.app/timetracker`), which has its
+>   own port of this app's UI (Next.js/React, `deliveries-app/src/app/timetracker/`
+>   and `deliveries-app/src/lib/timetracker/`) talking to a **different**
+>   Supabase project — real employee history was migrated there. See
+>   `deliveries-app`'s `DECISIONS.md` D-073/D-074.
+> - **`web/` (this repo's standalone Vite app) is still live and still
+>   being actively used** — its commit history is real bug fixes, not
+>   dead code — and it still points at the **old** Supabase project
+>   (`qklsxhzmbnglgzufdbmz`, referenced throughout this file and below).
+>   **This is an unresolved, active risk, not a settled decommission:**
+>   anyone tracking time through this `web/` app right now is writing to
+>   a different database than deliveries-app's `/timetracker` reads from.
+>   The two will silently diverge — a session logged in one is invisible
+>   in the other — until every remaining `web/` user is moved over and a
+>   second data migration closes the gap. Don't assume `web/` is
+>   deprecated just because a newer port exists elsewhere; confirm
+>   current usage before changing or removing anything here.
+> - Everything below this notice describes the **original, pre-merge**
+>   architecture (this repo, standalone, its own Supabase project). It's
+>   still accurate for `web/` as it exists today — just no longer the
+>   whole picture.
+
 An Upwork-style time tracker. Two clients, one backend:
 
 - **Web app** (Vite + React) → deployed on **Vercel**. The "lite" tracker:

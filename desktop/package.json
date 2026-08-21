@@ -35,7 +35,7 @@
       "icon": "build/icon.ico"
     },
     "publish": [
-      { "provider": "github", "owner": "CARRERSRTG", "repo": "timetracker", "releaseType": "release" }
+      { "provider": "github", "owner": "codingcodertg", "repo": "timetracker", "releaseType": "release" }
     ],
     "nsis": {
       "oneClick": false,

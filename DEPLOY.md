@@ -1,5 +1,12 @@
 # Deploying & operating Time Tracker
 
+> **⚠️ 2026-08-20 — see the notice at the top of `CLAUDE.md`.** Section 1
+> below (web app deploy) still applies to `web/` as it exists today, but
+> `web/` now duplicates (and diverges from) deliveries-app's `/timetracker`
+> — confirm who's still using it before deploying changes here. Section 3
+> (desktop auto-update) is corrected below: the desktop build no longer
+> bundles `web/`.
+
 ## 1. Web app → Vercel
 
 The web app is a standard Vite build in `web/`. [web/vercel.json](web/vercel.json)
@@ -38,17 +45,20 @@ The desktop app checks for updates on launch (packaged builds only) via
 configured to publish to GitHub Releases in
 [desktop/package.json](desktop/package.json) (`build.publish`).
 
-1. Edit `build.publish` `owner`/`repo` to your GitHub repo.
+1. `build.publish` `owner`/`repo` in `desktop/package.json` already points at
+   this repo (`codingcodertg/timetracker`, updated 2026-08-20 after the
+   GitHub org rename — see the note there if it drifts again).
 2. Create a GitHub token with `repo` scope and export it as `GH_TOKEN`.
 3. Build **and publish** a release:
    ```powershell
-   npm run build --prefix web
    cd desktop
    ..\node_modules\.bin\electron-builder --win nsis --publish always
    ```
-   This uploads the installer + `latest.yml` to a GitHub Release. Installed apps
-   pick up the next version automatically. Bump `version` in
-   `desktop/package.json` for each release.
+   No `web/` build step anymore (2026-08-20) — the packaged app loads the
+   hosted deliveries-app route at runtime instead of bundling a local UI
+   build (see `desktop/README.md`). This uploads the installer + `latest.yml`
+   to a GitHub Release. Installed apps pick up the next version automatically.
+   Bump `version` in `desktop/package.json` for each release.
 
 If you don't want auto-update, remove the `publish` block; the updater no-ops
 without it.
