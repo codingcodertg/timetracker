@@ -1,6 +1,11 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, desktopCapturer, screen, powerMonitor, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, screen, powerMonitor, dialog, Menu } = require('electron');
 const path = require('node:path');
+
+// No File/Edit/View/Window/Help — this is a single-purpose kiosk-style
+// client, not a browser; Chromium's default menu bar has nothing useful in
+// it here and just looks like unfinished chrome (D-080).
+Menu.setApplicationMenu(null);
 
 // uiohook-napi provides SYSTEM-WIDE keyboard/mouse events (works even when our
 // window is unfocused — the whole point of the desktop app). Load defensively:
@@ -338,6 +343,12 @@ function createWindow() {
     width: 1200,
     height: 860,
     title: 'Time Tracker v' + app.getVersion(),
+    // Matches the app's own dark theme (--tt-bg in timetracker.css). Paints
+    // immediately on window creation, before the page has loaded or laid
+    // out — without this Electron's own default (white) shows through
+    // during load and in any margin the page doesn't cover, which reads as
+    // a jarring void around the (correctly dark, once D-080 landed) content.
+    backgroundColor: '#0f1420',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
