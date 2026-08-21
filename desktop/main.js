@@ -360,8 +360,13 @@ function createWindow() {
   if (devUrl) {
     mainWindow.loadURL(devUrl);
   } else {
-    // packaged: web/dist copied into resources/web (see electron-builder config)
-    mainWindow.loadFile(path.join(process.resourcesPath, 'web', 'index.html'));
+    // Packaged: load the live hosted route instead of a locally-bundled web/
+    // build (D-074) — same pattern the deliveries driver APK already uses
+    // (Capacitor's server.url), so a deploy reaches every installed desktop
+    // client immediately with no reinstall. The page detects window.ttDesktop
+    // (injected by preload.js below) and turns on desktop-only behavior
+    // (system-wide activity metering, screenshot capture) at runtime.
+    mainWindow.loadURL('https://deliveries-app-seven.vercel.app/timetracker');
   }
 
   // Warn on exit while the clock is running: pressing X shows a message that
