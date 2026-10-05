@@ -47,6 +47,12 @@ contextBridge.exposeInMainWorld('ttDesktop', {
   // its text ('saved' | 'queued' | 'error')
   notifyShotStatus: (status) => ipcRenderer.invoke('tt:shotStatus', status),
 
+  // tell the main process a tick write was SAVED (fire-and-forget). The main
+  // process alarms — floating warning + beep — when a started session goes
+  // 90 s without one. Older pages never call this; the watchdog only arms after
+  // the first call.
+  heartbeat: (h) => ipcRenderer.send('tt:heartbeat', h),
+
   // --- auto-update ---
   // subscribe to update progress; cb receives { state, version?, percent?, message? }
   onUpdate: (cb) => {

@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, desktopCapturer, screen, powerMonitor, dialog, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, screen, powerMonitor, dialog, Menu, shell } = require('electron');
 const path = require('node:path');
 
 // No File/Edit/View/Window/Help — this is a single-purpose kiosk-style
@@ -50,6 +50,74 @@ const WINDOW_MS = 10 * 60 * 1000; // fixed 10-minute windows → exactly 6 shots
 const MIN_GAP_MS = 5 * 60 * 1000; // screenshots are never closer than 5 minutes apart
 let currentSessionId = null;
 
+// ---------------------------------------------------------------------
+// Heartbeat watchdog (incident 2026-10-04).
+//
+// The web page owns the clock: its 10 s tick writes the session row and it
+// uploads the screenshots this process captures. On 2026-10-04 the page stopped
+// doing both (the tracker screen was unmounted when the user opened another
+// tab) and this process never found out: it kept its screenshot timer, kept
+// showing "Screenshot captured", and the session went 3 h 12 min unrecorded.
+//
+// Newer versions of the page call ttDesktop.heartbeat() after every SAVED
+// write. Once we have seen one (so we know the page supports it — an older
+// deployment never sends any and must not trip the alarm), no heartbeat for
+// BEAT_MAX_MS while a session is started means nobody is recording:
+//   - a floating always-on-top warning + system beep, repeated every 5 min,
+//   - the main window is brought forward once,
+//   - and no screen is captured until the page is saving again (a capture
+//     nobody will upload is a privacy cost with no benefit).
+// ---------------------------------------------------------------------
+const BEAT_MAX_MS = 90 * 1000;
+const BEAT_CHECK_MS = 15 * 1000;
+const BEAT_ALARM_EVERY_MS = 5 * 60 * 1000;
+let beatSupported = false; // true after the first heartbeat of this app run
+let lastBeatMs = 0;
+let lastBeatAlarmMs = 0;
+let beatTimer = null;
+
+function recordingLost() {
+  return beatSupported && !!currentSessionId && Date.now() - lastBeatMs > BEAT_MAX_MS;
+}
+
+function checkBeat() {
+  if (!recordingLost()) { lastBeatAlarmMs = 0; return; }
+  const now = Date.now();
+  if (lastBeatAlarmMs && now - lastBeatAlarmMs < BEAT_ALARM_EVERY_MS) return;
+  const first = !lastBeatAlarmMs;
+  lastBeatAlarmMs = now;
+  const mins = Math.max(1, Math.round((now - lastBeatMs) / 60000));
+  showInfoToast('Time Tracker is NOT recording', 'No saved time for ' + mins + ' min — open the app', '⚠', 20000);
+  try { shell.beep(); } catch (e) { /* ignore */ }
+  if (first && mainWindow && !mainWindow.isDestroyed()) {
+    try { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.flashFrame(true); } catch (e) { /* ignore */ }
+  }
+}
+
+function startBeatWatch() {
+  lastBeatMs = Date.now(); // grace: the first tick write lands within ~10 s
+  lastBeatAlarmMs = 0;
+  clearInterval(beatTimer);
+  beatTimer = setInterval(checkBeat, BEAT_CHECK_MS);
+}
+
+function stopBeatWatch() {
+  clearInterval(beatTimer); beatTimer = null;
+  lastBeatAlarmMs = 0;
+}
+
+// Fire-and-forget from the page after each saved tick write.
+ipcMain.on('tt:heartbeat', () => {
+  beatSupported = true;
+  lastBeatMs = Date.now();
+  if (lastBeatAlarmMs && mainWindow && !mainWindow.isDestroyed()) { try { mainWindow.flashFrame(false); } catch (e) { /* ignore */ } }
+  lastBeatAlarmMs = 0;
+});
+
+// A screenshot handed to the page that the page never acknowledged.
+let shotAckTimer = null;
+const SHOT_ACK_MS = 45 * 1000;
+
 // per-screenshot segment activity: count distinct seconds with input in the
 // current 10-min segment, to show an Upwork-style activity bar on each shot.
 let segStartMs = 0;
@@ -96,6 +164,8 @@ if (uIOhook) {
 
 async function captureAndSend() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
+  // Nobody is saving: don't capture the screen for a page that will not upload it.
+  if (recordingLost()) { checkBeat(); return; }
   // activity % for this segment = distinct active seconds / seconds elapsed
   const elapsedS = Math.max(1, Math.round((Date.now() - segStartMs) / 1000));
   const activityPercent = Math.max(0, Math.min(100, Math.round((segActiveSeconds / elapsedS) * 100)));
@@ -115,10 +185,19 @@ async function captureAndSend() {
     });
     if (!sources.length) return;
     const dataUrl = sources[0].thumbnail.toDataURL();
-    // Show the floating on-top toast immediately (works even if the main window
-    // is minimized/hidden). The renderer later reports upload status to update it.
+    // The toast is NOT shown here any more. It used to say "Screenshot captured"
+    // before the page had done anything with the image, so it kept saying it for
+    // three hours on 2026-10-04 while no page was listening. Now the image is
+    // remembered and the toast appears when the page reports the outcome
+    // (tt:shotStatus: saved / queued / error). No report in SHOT_ACK_MS means the
+    // page is not handling captures: say that instead, with a beep.
     const timeText = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    showShotToast(dataUrl, timeText);
+    lastToast = { dataUrl, timeText };
+    clearTimeout(shotAckTimer);
+    shotAckTimer = setTimeout(() => {
+      showInfoToast('Screenshot was NOT saved', 'Time Tracker is not recording — open the app', '⚠', 20000);
+      try { shell.beep(); } catch (e) { /* ignore */ }
+    }, SHOT_ACK_MS);
     // The renderer owns the authenticated Supabase client, so it does the upload.
     mainWindow.webContents.send('tt:shot', { sessionId: currentSessionId, dataUrl, activityPercent });
   } catch (e) {
@@ -164,6 +243,7 @@ ipcMain.handle('tt:start', (_evt, opts) => {
   clearTimeout(shotTimer); shotTimer = null;
   lastShotMs = 0; // allow the first shot to happen within the current window
   scheduleNextShot();
+  startBeatWatch();
   // Confirm to the user that the clock started — a floating on-top toast (same
   // style as the screenshot notice) that shows even if the window is minimized.
   const timeText = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -173,6 +253,8 @@ ipcMain.handle('tt:start', (_evt, opts) => {
 
 ipcMain.handle('tt:stop', () => {
   clearTimeout(shotTimer); shotTimer = null;
+  clearTimeout(shotAckTimer); shotAckTimer = null;
+  stopBeatWatch();
   currentSessionId = null;
   stopHook();
   return { ok: true };
@@ -281,11 +363,15 @@ function showShotToast(dataUrl, timeText, status) {
 }
 
 // Renderer reports the upload outcome so the toast text can update.
-ipcMain.handle('tt:shotStatus', (_evt, status) => { showShotToast(null, lastToast?.timeText, status); return true; });
+ipcMain.handle('tt:shotStatus', (_evt, status) => {
+  clearTimeout(shotAckTimer); shotAckTimer = null; // the page did handle it
+  showShotToast(null, lastToast?.timeText, status);
+  return true;
+});
 
 // Generic text-only floating toast (no image) — reuses the same on-top window as
 // the screenshot toast so notices are visible even when the app is minimized.
-function showInfoToast(title, subtitle, icon) {
+function showInfoToast(title, subtitle, icon, holdMs) {
   const win = ensureToastWin();
   const payload = JSON.stringify({ dataUrl: '', timeText: subtitle || '', title: title || '', icon: icon || '' });
   const run = () => { win.webContents.executeJavaScript('window.__setToast(' + payload + ')').catch(() => {}); };
@@ -295,7 +381,7 @@ function showInfoToast(title, subtitle, icon) {
   win.setPosition(workArea.x + workArea.width - w - 16, workArea.y + workArea.height - h - 16);
   win.showInactive();
   clearTimeout(toastHideTimer);
-  toastHideTimer = setTimeout(() => { if (toastWin && !toastWin.isDestroyed()) toastWin.hide(); }, 5000);
+  toastHideTimer = setTimeout(() => { if (toastWin && !toastWin.isDestroyed()) toastWin.hide(); }, holdMs || 5000);
 }
 
 // ---------------------------------------------------------------------
@@ -425,6 +511,8 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   stopHook();
   clearTimeout(shotTimer);
+  clearTimeout(shotAckTimer);
+  stopBeatWatch();
   if (process.platform !== 'darwin') app.quit();
 });
 
