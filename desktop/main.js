@@ -1,6 +1,20 @@
 'use strict';
 const { app, BrowserWindow, ipcMain, desktopCapturer, screen, powerMonitor, dialog, Menu } = require('electron');
 const path = require('node:path');
+const fs = require('node:fs');
+
+// Abrir al iniciar Windows: se activa UNA sola vez (primer arranque de la app
+// empaquetada) y se anota en userData. Si después el usuario lo apaga en
+// Configuración → Aplicaciones → Inicio, no lo volvemos a encender.
+const ARRANQUE = () => path.join(app.getPath('userData'), 'arranque.json');
+function abrirAlIniciarLaPrimeraVez() {
+  if (!app.isPackaged || process.platform !== 'win32') return;
+  try { if (JSON.parse(fs.readFileSync(ARRANQUE(), 'utf8')).decidido) return; } catch { /* primera vez */ }
+  try {
+    app.setLoginItemSettings({ openAtLogin: true });
+    fs.writeFileSync(ARRANQUE(), JSON.stringify({ decidido: true, cuando: new Date().toISOString() }));
+  } catch { /* sin permiso o sin carpeta: se intenta otra vez al siguiente arranque */ }
+}
 
 // No File/Edit/View/Window/Help — this is a single-purpose kiosk-style
 // client, not a browser; Chromium's default menu bar has nothing useful in
@@ -406,6 +420,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  abrirAlIniciarLaPrimeraVez();
   createWindow();
   // check for updates on every launch (packaged app only, not the dev server)
   if (autoUpdater && !process.env.TT_DEV_URL && app.isPackaged) {
