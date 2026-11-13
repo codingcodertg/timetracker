@@ -28,10 +28,11 @@ contextBridge.exposeInMainWorld('ttDesktop', {
   getContext: () => ipcRenderer.invoke('tt:context'),
 
   // fired on OS power events; cb receives the reason
-  // ('lock-screen' | 'suspend' | 'resume' | 'unlock-screen'). Returns an
+  // ('lock-screen' | 'suspend' | 'resume' | 'unlock-screen') and the epoch ms at
+  // which the main process saw it (absent in older builds). Returns an
   // unsubscribe function.
   onPower: (cb) => {
-    const listener = (_evt, reason) => cb(reason);
+    const listener = (_evt, reason, at) => cb(reason, typeof at === 'number' ? at : undefined);
     ipcRenderer.on('tt:power', listener);
     return () => ipcRenderer.removeListener('tt:power', listener);
   },
