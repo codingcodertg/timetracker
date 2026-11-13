@@ -430,9 +430,12 @@ app.whenReady().then(() => {
   // Power events → renderer. On lock/sleep the renderer stops the timer (no
   // point counting while away). On resume/unlock it reconnects to Supabase so
   // the app recovers from the dead socket/stale token without a restart.
+  // The timestamp is taken HERE, in the main process, at the moment the OS
+  // reports the event: a renderer frozen by sleep receives 'suspend' only after
+  // waking, and its own Date.now() would then say the pause began at wake time.
   ['lock-screen', 'suspend', 'resume', 'unlock-screen'].forEach((evt) => {
     powerMonitor.on(evt, () => {
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('tt:power', evt);
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('tt:power', evt, Date.now());
     });
   });
 });
